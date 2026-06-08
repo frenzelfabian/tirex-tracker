@@ -46,13 +46,14 @@ const std::set<tirexMeasure> EnergyStats::measures{
 };
 
 EnergyStats::EnergyStats() : tracker() {
-	// On platforms without RAPL CPU/RAM energy (e.g., ARM / Raspberry Pi) fall back to the PMIC.
-	const auto cap = tracker.getCapabilities();
-	const bool raplCpuRam =
-			(cap & cppjoules::Capability::CPU_PROFILE) || (cap & cppjoules::Capability::RAM_PROFILE);
-	usePmic = !raplCpuRam && PmicReader::available();
+	// On the Raspberry Pi, cppjoules advertises CPU/RAM capability but returns no energy values
+	// (there is no RAPL on ARM), so trusting cppjoules yields "null J". Whenever the PMIC is
+	// readable we therefore prefer it as the authoritative CPU/RAM energy source.
+	// PmicReader::available() is only true on an actual Raspberry Pi, so x86 (RAPL) and macOS
+	// remain unaffected.
+	usePmic = PmicReader::available();
 	if (usePmic)
-		tirex::log::info("energy", "No RAPL CPU/RAM energy available; falling back to Raspberry Pi PMIC");
+		tirex::log::info("energy", "Using Raspberry Pi PMIC for CPU/RAM energy");
 }
 
 std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {

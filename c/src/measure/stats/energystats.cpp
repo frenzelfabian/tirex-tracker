@@ -45,7 +45,15 @@ const std::set<tirexMeasure> EnergyStats::measures{
 		TIREX_CPU_ENERGY_SYSTEM_JOULES, TIREX_RAM_ENERGY_SYSTEM_JOULES, TIREX_GPU_ENERGY_SYSTEM_JOULES
 };
 
-EnergyStats::EnergyStats() : tracker() {}
+EnergyStats::EnergyStats() : tracker() {
+	// On platforms without RAPL CPU/RAM energy (e.g., ARM / Raspberry Pi) fall back to the PMIC.
+	const auto cap = tracker.getCapabilities();
+	const bool raplCpuRam =
+			(cap & cppjoules::Capability::CPU_PROFILE) || (cap & cppjoules::Capability::RAM_PROFILE);
+	usePmic = !raplCpuRam && PmicReader::available();
+	if (usePmic)
+		tirex::log::info("energy", "No RAPL CPU/RAM energy available; falling back to Raspberry Pi PMIC");
+}
 
 std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
 	std::set<tirexMeasure> measures{};
@@ -56,13 +64,37 @@ std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
 		measures.insert(TIREX_RAM_ENERGY_SYSTEM_JOULES);
 	if (cap & cppjoules::Capability::GPU_PROFILE)
 		measures.insert(TIREX_GPU_ENERGY_SYSTEM_JOULES);
+	if (usePmic) {
+		// The PMIC measures the SoC core and DRAM rails; there is no discrete GPU.
+		measures.insert(TIREX_CPU_ENERGY_SYSTEM_JOULES);
+		measures.insert(TIREX_RAM_ENERGY_SYSTEM_JOULES);
+	}
 	return measures;
 }
 
-void EnergyStats::start() { tracker.start(); }
-void EnergyStats::stop() { tracker.stop(); }
+void EnergyStats::start() {
+	tracker.start();
+	if (usePmic)
+		pmic.start();
+}
+void EnergyStats::stop() {
+	tracker.stop();
+	if (usePmic)
+		pmic.stop();
+}
+void EnergyStats::step() {
+	if (usePmic)
+		pmic.step();
+}
 Stats EnergyStats::getStats() {
 	using json = nlohmann::json;
+	if (usePmic) {
+		// Energy is integrated from the PMIC power samples; values are already in joules.
+		return makeFilteredStats(
+				enabled, std::pair{TIREX_CPU_ENERGY_SYSTEM_JOULES, json(pmic.coreJoules())},
+				std::pair{TIREX_RAM_ENERGY_SYSTEM_JOULES, json(pmic.ramJoules())}
+		);
+	}
 	auto results = tracker.calculate_energy().energy;
 	for (auto& [device, result] : results)
 		tirex::log::debug("cppjoules", "[{}] {}", device, result);

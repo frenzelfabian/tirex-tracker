@@ -1,6 +1,7 @@
 #ifndef STATS_ENERGYSTATS_HPP
 #define STATS_ENERGYSTATS_HPP
 
+#include "pmicstats.hpp"
 #include "provider.hpp"
 
 #include <cppjoules/cppjoules.hpp>
@@ -9,6 +10,8 @@ namespace tirex {
 	class EnergyStats final : public StatsProvider {
 	private:
 		cppjoules::EnergyTracker tracker;
+		PmicReader pmic;	   /**< Raspberry Pi PMIC fallback (used iff usePmic). */
+		bool usePmic = false;  /**< True when no RAPL CPU/RAM energy is available but a PMIC is. */
 
 	public:
 		EnergyStats();
@@ -16,6 +19,7 @@ namespace tirex {
 		std::set<tirexMeasure> providedMeasures() noexcept override;
 		void start() override;
 		void stop() override;
+		void step() override;
 		Stats getStats() override;
 
 		static constexpr const char* description = "Collects the energy consumption of various components.";

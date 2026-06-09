@@ -3,16 +3,19 @@
 
 #include <chrono>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace tirex {
 	/**
 	 * @brief Reads the Raspberry Pi 5 PMIC rails and integrates power into energy.
-	 * @details The Raspberry Pi exposes per-rail current and voltage through its PMIC via
-	 * `vcgencmd pmic_read_adc`. This reader samples the rails, computes the instantaneous power
-	 * per rail (P = U * I) and integrates it over time (trapezoidal rule) into energy in joules.
-	 * It is used by EnergyStats as a fallback on platforms where no RAPL energy is available (i.e.,
-	 * on ARM / Raspberry Pi). On any non-Raspberry-Pi platform PmicReader::available() returns false
-	 * and all methods are no-ops.
+	 * @details The Raspberry Pi exposes per-rail current and voltage through its PMIC. This reader
+	 * obtains them by sending the firmware "gencmd" `pmic_read_adc` directly through the VideoCore
+	 * mailbox property interface on `/dev/vcio` (the same mechanism `vcgencmd` uses, so no external
+	 * binary is required). It computes the instantaneous power per rail (P = U * I) and integrates
+	 * it over time (trapezoidal rule) into energy in joules. EnergyStats uses it on platforms where
+	 * no RAPL energy is available (i.e., ARM / Raspberry Pi). On any non-Raspberry-Pi platform
+	 * PmicReader::available() returns false and all methods are no-ops.
 	 *
 	 * The rails are mapped onto the same categories that RAPL reports:
 	 *   - VDD_CORE              -> CPU energy
@@ -45,8 +48,15 @@ namespace tirex {
 			double ramW;  /**< Instantaneous power of the RAM rails in watt. */
 		};
 
-		/** @brief Reads the PMIC once. Returns empty if the rails could not be read. */
+		/** @brief Reads the PMIC once via the VideoCore mailbox. Empty if the rails can't be read. */
 		static std::optional<Sample> readOnce();
+
+		/**
+		 * @brief Parses the text output of `pmic_read_adc` into a power sample.
+		 * @details Pure (no I/O); separated from readOnce() for testability. Returns empty if no
+		 * rails could be parsed.
+		 */
+		static std::optional<Sample> parseAdc(std::string_view output);
 
 		bool hasPrev = false;
 		Sample prev{};

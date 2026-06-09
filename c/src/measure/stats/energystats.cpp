@@ -45,7 +45,16 @@ const std::set<tirexMeasure> EnergyStats::measures{
 		TIREX_CPU_ENERGY_SYSTEM_JOULES, TIREX_RAM_ENERGY_SYSTEM_JOULES, TIREX_GPU_ENERGY_SYSTEM_JOULES
 };
 
-EnergyStats::EnergyStats() : tracker() {}
+EnergyStats::EnergyStats() : tracker() {
+	// On the Raspberry Pi, cppjoules advertises CPU/RAM capability but returns no energy values
+	// (there is no RAPL on ARM), so trusting cppjoules yields "null J". Whenever the PMIC is
+	// readable we therefore prefer it as the authoritative CPU/RAM energy source.
+	// PmicReader::available() is only true on an actual Raspberry Pi, so x86 (RAPL) and macOS
+	// remain unaffected.
+	usePmic = PmicReader::available();
+	if (usePmic)
+		tirex::log::info("energy", "Using Raspberry Pi PMIC for CPU/RAM energy");
+}
 
 std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
 	std::set<tirexMeasure> measures{};
@@ -56,13 +65,37 @@ std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
 		measures.insert(TIREX_RAM_ENERGY_SYSTEM_JOULES);
 	if (cap & cppjoules::Capability::GPU_PROFILE)
 		measures.insert(TIREX_GPU_ENERGY_SYSTEM_JOULES);
+	if (usePmic) {
+		// The PMIC measures the SoC core and DRAM rails; there is no discrete GPU.
+		measures.insert(TIREX_CPU_ENERGY_SYSTEM_JOULES);
+		measures.insert(TIREX_RAM_ENERGY_SYSTEM_JOULES);
+	}
 	return measures;
 }
 
-void EnergyStats::start() { tracker.start(); }
-void EnergyStats::stop() { tracker.stop(); }
+void EnergyStats::start() {
+	tracker.start();
+	if (usePmic)
+		pmic.start();
+}
+void EnergyStats::stop() {
+	tracker.stop();
+	if (usePmic)
+		pmic.stop();
+}
+void EnergyStats::step() {
+	if (usePmic)
+		pmic.step();
+}
 Stats EnergyStats::getStats() {
 	using json = nlohmann::json;
+	if (usePmic) {
+		// Energy is integrated from the PMIC power samples; values are already in joules.
+		return makeFilteredStats(
+				enabled, std::pair{TIREX_CPU_ENERGY_SYSTEM_JOULES, json(pmic.coreJoules())},
+				std::pair{TIREX_RAM_ENERGY_SYSTEM_JOULES, json(pmic.ramJoules())}
+		);
+	}
 	auto results = tracker.calculate_energy().energy;
 	for (auto& [device, result] : results)
 		tirex::log::debug("cppjoules", "[{}] {}", device, result);

@@ -10,9 +10,8 @@ namespace tirex {
 	class EnergyStats final : public StatsProvider {
 	private:
 		cppjoules::EnergyTracker tracker;
-		PmicReader pmic;	   /**< Raspberry Pi PMIC fallback (used iff usePmic). */
-		bool usePmic = false;  /**< True when no RAPL CPU/RAM energy is available but a PMIC is. */
-
+		PmicReader pmic;	   
+		bool usePmic = false;  
 	public:
 		EnergyStats();
 

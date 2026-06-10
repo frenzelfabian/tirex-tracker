@@ -43,9 +43,6 @@ static auto transform(const std::optional<T>& opt, const Fn& transform)
 
 /**
  * @brief Whether the kernel exposes a RAPL energy backend (Intel/AMD via the powercap subsystem).
- * @details We probe the real sysfs interface (\c /sys/class/powercap/intel-rapl*\c/energy_uj)
- * rather than relying on cppjoules' capability flag, which on ARM falsely reports CPU/RAM support
- * (and then yields "null J"). Returns false if the powercap directory does not exist.
  */
 static bool raplBackendPresent() {
 	namespace fs = std::filesystem;
@@ -64,10 +61,6 @@ const std::set<tirexMeasure> EnergyStats::measures{
 };
 
 EnergyStats::EnergyStats() : tracker() {
-	// Use the Raspberry Pi PMIC for CPU/RAM energy only when there is no real RAPL backend and the
-	// PMIC is readable. RAPL is detected via the kernel powercap sysfs interface, not via cppjoules'
-	// capability flag (which falsely reports CPU/RAM support on ARM). PmicReader::available() is
-	// only true on an actual Raspberry Pi, so x86 (RAPL) and macOS remain unaffected.
 	const bool rapl = raplBackendPresent();
 	usePmic = !rapl && PmicReader::available();
 	if (usePmic)
@@ -86,7 +79,6 @@ std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
 	if (cap & cppjoules::Capability::GPU_PROFILE)
 		measures.insert(TIREX_GPU_ENERGY_SYSTEM_JOULES);
 	if (usePmic) {
-		// The PMIC measures the SoC core and DRAM rails; there is no discrete GPU.
 		measures.insert(TIREX_CPU_ENERGY_SYSTEM_JOULES);
 		measures.insert(TIREX_RAM_ENERGY_SYSTEM_JOULES);
 	}

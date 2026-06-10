@@ -2,6 +2,7 @@
 
 #include "../../logging.hpp"
 
+#include <filesystem>
 #include <optional>
 
 using namespace std::string_literals;
@@ -40,20 +41,39 @@ static auto transform(const std::optional<T>& opt, const Fn& transform)
 	return std::nullopt;
 }
 
+/**
+ * @brief Whether the kernel exposes a RAPL energy backend (Intel/AMD via the powercap subsystem).
+ * @details We probe the real sysfs interface (\c /sys/class/powercap/intel-rapl*\c/energy_uj)
+ * rather than relying on cppjoules' capability flag, which on ARM falsely reports CPU/RAM support
+ * (and then yields "null J"). Returns false if the powercap directory does not exist.
+ */
+static bool raplBackendPresent() {
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	for (const auto& entry : fs::directory_iterator("/sys/class/powercap", ec)) {
+		if (entry.path().filename().string().starts_with("intel-rapl") &&
+			fs::exists(entry.path() / "energy_uj", ec))
+			return true;
+	}
+	return false;
+}
+
 const char* EnergyStats::version = nullptr;
 const std::set<tirexMeasure> EnergyStats::measures{
 		TIREX_CPU_ENERGY_SYSTEM_JOULES, TIREX_RAM_ENERGY_SYSTEM_JOULES, TIREX_GPU_ENERGY_SYSTEM_JOULES
 };
 
 EnergyStats::EnergyStats() : tracker() {
-	// On the Raspberry Pi, cppjoules advertises CPU/RAM capability but returns no energy values
-	// (there is no RAPL on ARM), so trusting cppjoules yields "null J". Whenever the PMIC is
-	// readable we therefore prefer it as the authoritative CPU/RAM energy source.
-	// PmicReader::available() is only true on an actual Raspberry Pi, so x86 (RAPL) and macOS
-	// remain unaffected.
-	usePmic = PmicReader::available();
+	// Use the Raspberry Pi PMIC for CPU/RAM energy only when there is no real RAPL backend and the
+	// PMIC is readable. RAPL is detected via the kernel powercap sysfs interface, not via cppjoules'
+	// capability flag (which falsely reports CPU/RAM support on ARM). PmicReader::available() is
+	// only true on an actual Raspberry Pi, so x86 (RAPL) and macOS remain unaffected.
+	const bool rapl = raplBackendPresent();
+	usePmic = !rapl && PmicReader::available();
 	if (usePmic)
 		tirex::log::info("energy", "Using Raspberry Pi PMIC for CPU/RAM energy");
+	else if (rapl)
+		tirex::log::info("energy", "Using RAPL for CPU/RAM energy");
 }
 
 std::set<tirexMeasure> EnergyStats::providedMeasures() noexcept {
@@ -89,22 +109,24 @@ void EnergyStats::step() {
 }
 Stats EnergyStats::getStats() {
 	using json = nlohmann::json;
-	if (usePmic) {
-		// Energy is integrated from the PMIC power samples; values are already in joules.
-		return makeFilteredStats(
-				enabled, std::pair{TIREX_CPU_ENERGY_SYSTEM_JOULES, json(pmic.coreJoules())},
-				std::pair{TIREX_RAM_ENERGY_SYSTEM_JOULES, json(pmic.ramJoules())}
-		);
-	}
 	auto results = tracker.calculate_energy().energy;
 	for (auto& [device, result] : results)
 		tirex::log::debug("cppjoules", "[{}] {}", device, result);
 	// Divide by 1000'000 since CPPJoules reports micro Joule (uJ)
 	auto divide = [](long long divisor) { return [divisor](long long divident) { return divident / divisor; }; };
-	return makeFilteredStats(
+	auto stats = makeFilteredStats(
 			enabled,
 			std::pair{TIREX_CPU_ENERGY_SYSTEM_JOULES, json(transform(tryget(results, "core-0"), divide(1000'000)))},
 			std::pair{TIREX_RAM_ENERGY_SYSTEM_JOULES, json(transform(tryget(results, "dram-0"), divide(1000'000)))},
 			std::pair{TIREX_GPU_ENERGY_SYSTEM_JOULES, json(transform(tryget(results, "nvidia_gpu_0"), divide(1000)))}
 	);
+	if (usePmic) {
+		// Override CPU/RAM with the PMIC measurements (joules already); any GPU energy reported by
+		// cppjoules is left intact, so both sources coexist on a hypothetical RAPL+PMIC machine.
+		if (enabled.contains(TIREX_CPU_ENERGY_SYSTEM_JOULES))
+			stats[TIREX_CPU_ENERGY_SYSTEM_JOULES] = json(pmic.coreJoules());
+		if (enabled.contains(TIREX_RAM_ENERGY_SYSTEM_JOULES))
+			stats[TIREX_RAM_ENERGY_SYSTEM_JOULES] = json(pmic.ramJoules());
+	}
+	return stats;
 }

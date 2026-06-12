@@ -14,14 +14,13 @@ const std::set<tirexMeasure> TemperatureStats::measures{TIREX_CPU_TEMPERATURE_CE
 #include <string>
 
 /**
- * @brief Locates the sysfs file that reports the CPU package temperature (in millidegree Celsius).
- * @details Prefers thermal zones whose type identifies the CPU/SoC (e.g., x86_pkg_temp on Intel, cpu-thermal on the
- * Raspberry Pi) and falls back to well-known hwmon CPU sensors (e.g., k10temp on AMD).
+ * @brief Locates the sysfs thermal zone that reports the CPU package temperature (in millidegree Celsius).
+ * @details Searches /sys/class/thermal for a zone whose type identifies the CPU/SoC (e.g., x86_pkg_temp on Intel or
+ * cpu-thermal on the Raspberry Pi).
  */
 static std::filesystem::path findCPUTemperatureSensor() {
 	namespace fs = std::filesystem;
 	std::error_code ec;
-	// Pass 1: thermal zones with a CPU/SoC-specific type
 	static const char* const zonetypes[] = {"x86_pkg_temp", "cpu-thermal", "cpu_thermal", "soc-thermal", "soc_thermal"};
 	for (const auto& entry : fs::directory_iterator("/sys/class/thermal", ec)) {
 		if (!entry.path().filename().string().starts_with("thermal_zone"))
@@ -33,17 +32,6 @@ static std::filesystem::path findCPUTemperatureSensor() {
 		for (const char* wanted : zonetypes)
 			if (type == wanted)
 				return entry.path() / "temp";
-	}
-	// Pass 2: well-known hwmon CPU sensors
-	static const char* const hwmonnames[] = {"coretemp", "k10temp", "zenpower", "cpu_thermal"};
-	for (const auto& entry : fs::directory_iterator("/sys/class/hwmon", ec)) {
-		std::ifstream stream(entry.path() / "name");
-		std::string name;
-		if (!stream || !std::getline(stream, name))
-			continue;
-		for (const char* wanted : hwmonnames)
-			if (name == wanted && fs::exists(entry.path() / "temp1_input", ec))
-				return entry.path() / "temp1_input";
 	}
 	return {};
 }

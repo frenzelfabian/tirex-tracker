@@ -13,8 +13,8 @@ namespace tirex {
 	 * @brief Tracks the CPU package temperature over the measured period as a time series.
 	 * @details The temperature is read from the operating system's thermal interface. On Linux this is the sysfs
 	 * thermal zone whose type identifies the CPU/SoC (e.g., \c x86_pkg_temp on Intel or \c cpu-thermal on the
-	 * Raspberry Pi), with well-known hwmon CPU sensors (e.g., \c k10temp on AMD) as fallback. On systems without a
-	 * recognized sensor (and on Windows/macOS, where this is not implemented), the measure is not provided.
+	 * Raspberry Pi). On systems without a recognized sensor (and on Windows/macOS, where this is not implemented),
+	 * the measure is not provided.
 	 */
 	class TemperatureStats final : public StatsProvider {
 	private:

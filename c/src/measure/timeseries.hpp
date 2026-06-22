@@ -199,10 +199,6 @@ namespace tirex {
 					max = maxFn(max, value);
 					min = minFn(min, value);
 				}
-				// Welford's online algorithm for a numerically stable running mean: rather than
-				// accumulating a potentially large sum and dividing, the mean is updated incrementally
-				// (mean += (x - mean) / n). This avoids the precision loss of sum/count for long
-				// series or large-magnitude values, while staying O(1) per sample.
 				numAdded += 1;
 				mean += (static_cast<double>(value) - mean) / static_cast<double>(numAdded);
 				avg = static_cast<T>(mean);

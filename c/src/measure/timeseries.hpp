@@ -170,7 +170,7 @@ namespace tirex {
 			T max;			 /**< @brief Maximum value encountered in the time series **/
 			T min;			 /**< @brief Minimum value encountered in the time series **/
 			T avg;			 /**< @brief Average value encountered in the time series **/
-			double sum;		 /**< @brief Sum over all values, used to compute the average **/
+			double mean;	 /**< @brief Running mean (Welford), used to compute the average **/
 			size_t numAdded; /**< @brief Number of values added, used to compute the average **/
 			std::vector<std::chrono::milliseconds> timepoints;
 			std::vector<T> values;
@@ -181,7 +181,7 @@ namespace tirex {
 		public:
 			StoreImpl() : StoreImpl(clock::now()) {}
 			explicit StoreImpl(clock::time_point starttime)
-					: starttime(starttime), max(), min(), avg(), sum(0), numAdded(0), timepoints(), values() {}
+					: starttime(starttime), max(), min(), avg(), mean(0), numAdded(0), timepoints(), values() {}
 			StoreImpl(StoreImpl&& other) = default;
 
 			StoreImpl& operator=(StoreImpl&& other) = default;
@@ -199,9 +199,13 @@ namespace tirex {
 					max = maxFn(max, value);
 					min = minFn(min, value);
 				}
-				sum += static_cast<double>(value);
+				// Welford's online algorithm for a numerically stable running mean: rather than
+				// accumulating a potentially large sum and dividing, the mean is updated incrementally
+				// (mean += (x - mean) / n). This avoids the precision loss of sum/count for long
+				// series or large-magnitude values, while staying O(1) per sample.
 				numAdded += 1;
-				avg = static_cast<T>(sum / static_cast<double>(numAdded));
+				mean += (static_cast<double>(value) - mean) / static_cast<double>(numAdded);
+				avg = static_cast<T>(mean);
 			}
 
 			const T& maxValue() const noexcept override { return max; }
